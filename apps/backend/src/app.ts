@@ -12,6 +12,7 @@ import dotenv from 'dotenv';
 // 共用設定 API
 import configRouter from './shared/routes/config';
 import { validateEnv } from './shared/util/validateEnv';
+import { APP_VERSION } from './shared/util/appVersion';
 
 // 語音通知 (Call Schedule)
 // 註：這些模組載入時只會把環境變數讀成常數、建立物件，不會因缺漏而 throw
@@ -203,7 +204,7 @@ app.listen(PORT, async () => {
     console.log(`🚀 Server is running on port ${PORT}`);
     console.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
     console.log(`🕐 Site timezone: ${process.env.SITE_TIMEZONE}`);
-    console.log(`ℹ️ Version: v3.0.2`);
+    console.log(`ℹ️ Version: v${APP_VERSION}`);
 
   } catch (error) {
     console.error('啟動服務器失敗:', error);

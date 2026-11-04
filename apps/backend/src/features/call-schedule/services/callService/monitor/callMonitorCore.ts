@@ -1,6 +1,6 @@
 import schedule from 'node-schedule';
 import { getDatabase } from '../../database';
-import { phoneApiService } from '../phoneApiService';
+import * as freeSwitchApi from '../../api/freeSwitchApi';
 import { notifyCallResult } from './callResultNotifier';
 
 // ─────────────────────────────────────────────
@@ -11,7 +11,7 @@ type PendingCall = {
   scheduleId: string;
   extension: string;
   from: string;
-  callId?: string;  // 各設備正規化後的通話識別碼（見 phoneApiService.ts ApiResult.callId），供精準比對用（見下方 dequeueCall 說明）
+  callId?: string;  // FreeSwitch request_id（見 types/apiResult.ts 的 callId），供精準比對用（見下方 dequeueCall 說明）
   retryCount: number;
   maxRetries: number;
   retryIntervalMs: number;
@@ -33,22 +33,17 @@ export type RegisterCallOptions = {
 
 // key = extension（被叫分機號碼），value = 該分機目前在飛行中的通話佇列（FIFO）。
 // 用陣列而非單一物件是因為同分機可能同時有多通電話在監控中（例如同房間短時間內
-// 收到多筆 WR，或重試撞上下一筆排程）——RING/ANSWER/BYE 事件只帶分機號碼，無法
+// 收到多筆 WR，或重試撞上下一筆排程）——事件沒帶 callId 時只能靠分機號碼，無法
 // 精確對應是哪一通，因此以「先登記的先處理」為前提，用佇列先進先出比對，避免用
 // 單一 Map entry 導致後面登記的覆蓋前面的、讓前一通的事件被吃掉（見
 // docs/FIAS_LAKESHORE_TEST_LOG.md 同分機重疊測試的紀錄）。
 const pendingCalls = new Map<string, PendingCall[]>();
 
-function peekCall(ext: string): PendingCall | undefined {
-  return pendingCalls.get(ext)?.[0];
-}
-
-// callId 有帶值時（目前只有 FreeSwitch 經 phoneApiService 正規化提供，見 device/freeSwitch.ts）
+// callId 有帶值時（FreeSwitch 的 request_id，由 freeSwitchApi.makeMorningCall 提供）
 // 精準比對佇列裡對應的那一筆，而不是照隊首 FIFO 猜測——避免佇列裡卡著一筆從未收到 CDR 回呼的
 // 舊通話時，後面真正的事件被誤配對到舊的 scheduleId 上（2026-07-21 煙波房間 0323 事故：真正
 // 接聽的通話被誤判給前一天卡住的舊 job，當天的 job 反而永遠停在 CALLING，事後又被誤判成未接聽
-// 而重打）。callId 沒帶值時（NewRock/Yeastar 的事件只有分機號碼，沒有單通電話的識別碼）維持
-// 原本的 FIFO 隊首邏輯。
+// 而重打）。callId 沒帶值時（撥號回應沒拿到 request_id）退回 FIFO 隊首邏輯。
 function dequeueCall(ext: string, callId?: string): PendingCall | undefined {
   const queue = pendingCalls.get(ext);
   if (!queue || queue.length === 0) return undefined;
@@ -98,15 +93,8 @@ function updateStatus(scheduleId: string, status: string, callRecord?: string, r
 }
 
 // ─────────────────────────────────────────────
-// 事件處理（供各設備 service 呼叫）
+// 事件處理（供 freeSwitchCallMonitor 呼叫）
 // ─────────────────────────────────────────────
-
-export function handleRing(ext: string): void {
-  const call = peekCall(ext);
-  if (!call) return;
-  console.log(`[CallMonitor] 🔔 RING  ext=${ext} scheduleId=${call.scheduleId}`);
-  updateStatus(call.scheduleId, 'RINGING');
-}
 
 export function handleAnswer(ext: string, callId?: string): void {
   const call = dequeueCall(ext, callId);
@@ -117,12 +105,6 @@ export function handleAnswer(ext: string, callId?: string): void {
   console.log(`[CallMonitor] 📞 ANSWER ext=${ext} scheduleId=${call.scheduleId}`);
   updateStatus(call.scheduleId, 'ANSWERED', new Date().toISOString());
   notifyCallResult({ scheduleId: call.scheduleId, extension: ext, finalStatus: 'ANSWERED', callRecord: new Date().toISOString() });
-}
-
-// 我方主動掛斷、通話正常結束的清理（不進重試邏輯），供設備 service 在偵測到
-// 「我方掛斷」事件時呼叫（例如 NewRock 的 BYE attribute）。
-export function clearPendingCall(ext: string): void {
-  dequeueCall(ext);
 }
 
 export async function handleBye(ext: string, callId?: string): Promise<void> {
@@ -159,7 +141,7 @@ export async function handleBye(ext: string, callId?: string): Promise<void> {
         `🔄 [CallMonitor] 執行第 ${nextRetryCount}/${call.maxRetries} 次重試 scheduleId=${call.scheduleId} ext=${ext}`
       );
       try {
-        const result = await phoneApiService.makeCall(call.from, ext);
+        const result = await freeSwitchApi.makeMorningCall(call.from, ext);
         if (!result.success) {
           console.error(`[CallMonitor] 重試撥打失敗:`, result.error);
           updateStatus(call.scheduleId, 'ERROR', new Date().toISOString());
@@ -212,8 +194,4 @@ export function cancelScheduleJobs(
       console.log(`[CallMonitor] Cancelled retry job: ${jobName}`);
     }
   });
-}
-
-export function getPendingCalls(): Map<string, PendingCall[]> {
-  return pendingCalls;
 }

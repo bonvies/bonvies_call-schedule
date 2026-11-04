@@ -16,13 +16,13 @@ import { APP_VERSION } from './shared/util/appVersion';
 
 // 語音通知 (Call Schedule)
 // 註：這些模組載入時只會把環境變數讀成常數、建立物件，不會因缺漏而 throw
-//     （設備選擇在呼叫時才執行），因此可以靜態 import；缺漏與否交給下方 validateEnv() 統一檢查。
+//     （env 相關的檢查都在函式呼叫時才執行），因此可以靜態 import；缺漏與否交給下方 validateEnv() 統一檢查。
 import callScheduleRouter from './features/call-schedule/routes/callSchedule';
 import lakeshoreRouter from './features/call-schedule/routes/hotel/lakeshore';
 import { initDatabase } from './features/call-schedule/services/database';
-import { startCallMonitorServer } from './features/call-schedule/services/callService/callMonitorService';
+import { startCallMonitorServer } from './features/call-schedule/services/callService/monitor/freeSwitchCallMonitor';
 import { recoverPendingSchedules } from './features/call-schedule/services/callService/callScheduleService';
-import { phoneApiService } from './features/call-schedule/services/callService/phoneApiService';
+import { init as initFreeSwitch } from './features/call-schedule/services/api/freeSwitchApi';
 import fiasHandler from './features/call-schedule/components/fiasHandler';
 import { createServer as createFiasServer } from './features/call-schedule/util/fias';
 import { connectToPms } from './features/call-schedule/util/fiasClient';
@@ -37,7 +37,7 @@ import { registerCallResultHandler } from './features/call-schedule/services/cal
 dotenv.config();
 
 /**
- * 依目前的組合（TELEPHONE_EQUIPMENT / ENABLE_FIAS / FIAS_MODE）一次驗證環境變數，
+ * 依目前的組合（ENABLE_FIAS / FIAS_MODE）一次驗證環境變數，
  * 缺漏或填錯會在此處列出並終止服務。完整規則請見 apps/backend/.env.example
  * 與 shared/util/validateEnv.ts。
  *
@@ -72,8 +72,8 @@ app.use(express.urlencoded({ extended: true })); // 解析 URL-encoded form data
 app.use('/api/config', configRouter);        // 站點設定 API（時區等）
 
 // 語音通知路由
-// 註：FreeSWITCH 的 CDR webhook（/freeswitch-webhook）由 FreeSwitchCallMonitorService
-//     在 startCallMonitorServer() 時才掛到 callScheduleRouter 上，僅 TELEPHONE_EQUIPMENT=FreeSwitch 時生效。
+// 註：FreeSWITCH 的 CDR webhook（/freeswitch-webhook）由 monitor/freeSwitchCallMonitor.ts
+//     在 startCallMonitorServer() 時才掛到 callScheduleRouter 上。
 //     Express 在收到請求時才比對 router 內的路由，所以「先掛 app、之後才加路由」仍會生效。
 app.use('/api/call-schedule', callScheduleRouter);
 
@@ -126,7 +126,7 @@ async function setupCallSchedule(): Promise<void> {
   // ── 電話設備初始化 ────────────────────────────────────────────────────────
   // 失敗時僅 log，不中斷啟動——排程與監控照常啟動，撥號時才回報設備錯誤
   try {
-    await phoneApiService.init?.();
+    await initFreeSwitch();
   } catch (error) {
     console.error('❌ [CallSchedule] 話機設備初始化失敗，排程將繼續啟動但無法撥出電話:', error);
   }
@@ -135,7 +135,7 @@ async function setupCallSchedule(): Promise<void> {
   recoverPendingSchedules();
 
   // ── 通話狀態監控 ──────────────────────────────────────────────────────────
-  // 失敗時僅 log，不中斷啟動——設備未設定時監控無法啟動，但 server 照常運行
+  // 失敗時僅 log，不中斷啟動
   try {
     startCallMonitorServer(callScheduleRouter);
   } catch (error) {

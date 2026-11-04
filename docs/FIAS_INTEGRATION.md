@@ -149,9 +149,9 @@ PMS 通知系統取消指定房間的叫醒排程。`WC` 為 Oracle Hospitality 
 
 ### GI / GO — 客人入住 / 退房（Guest In / Guest Out）
 
-> 僅於 `TELEPHONE_EQUIPMENT=FreeSwitch` 時生效：收到後透過 FusionPBX 的 FIAS Middleware
+> 收到後透過 FusionPBX 的 FIAS Middleware
 > （`FREESWITCH_PMS_API_URL`，見《FusionPBX / FreeSWITCH PMS-FIAS 整合說明書》）更新房間分機的
-> 通話權限與顯示名稱。其他設備收到時僅記錄後略過。
+> 通話權限與顯示名稱。
 
 **PMS → 系統（入住）**
 ```
@@ -249,7 +249,7 @@ FIAS 規格中的 `<ACK>/<NAK>` 僅為序列傳輸層級的位元組完整性確
 
 > `RE` 是雙向記錄類型：上面的 `RS` 是我方主動送給 PMS；這裡的 `DN` 則是 **PMS 主動送給我方**，兩者用途完全獨立，互不影響。
 
-僅於 `TELEPHONE_EQUIPMENT=FreeSwitch` 時生效：收到後透過 FIAS Middleware 的 `/pms/extension/update`（`do_not_disturb` 欄位）更新房間分機的 DND 狀態。本系統純轉發，DND 開啟後的實際擋話行為由 FreeSwitch/FusionPBX middleware 負責。
+收到後透過 FIAS Middleware 的 `/pms/extension/update`（`do_not_disturb` 欄位）更新房間分機的 DND 狀態。本系統純轉發，DND 開啟後的實際擋話行為由 FreeSwitch/FusionPBX middleware 負責。
 
 **PMS → 系統**
 ```

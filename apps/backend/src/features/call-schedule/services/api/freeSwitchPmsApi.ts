@@ -1,5 +1,5 @@
 import axios from 'axios';
-import { ApiResult } from '../callService/phoneApiService';
+import { ApiResult } from '@call-schedule/types/apiResult';
 import dotenv from 'dotenv';
 
 dotenv.config();

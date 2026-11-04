@@ -1,6 +1,5 @@
 import express, { Router } from 'express';
-import { ICallMonitorService } from '../../callMonitorService';
-import { registerCall, cancelScheduleJobs, handleAnswer, handleBye } from '../callMonitorCore';
+import { handleAnswer, handleBye } from './callMonitorCore';
 import { getFiasConn } from '@call-schedule/util/fiasConnectionStore';
 
 // ─────────────────────────────────────────────
@@ -129,24 +128,15 @@ webhookRouter.post('/', (req, res) => {
 });
 
 // ─────────────────────────────────────────────
-// ICallMonitorService 實作
+// 啟動
 // ─────────────────────────────────────────────
 
-function connect(router: Router): void {
-  // 掛載於傳入的 placeholder router（已在 404 handler 之前預先註冊於 Express app）。
-  // 只有 TELEPHONE_EQUIPMENT=FreeSwitch 時 start() 才會被呼叫，故不需額外設備判斷。
-  // 最終路徑：POST /api/call-schedule/freeswitch-webhook
+/**
+ * 把 CDR webhook 掛到傳入的 placeholder router（已在 404 handler 之前預先註冊於 Express app）。
+ * 最終路徑：POST /api/call-schedule/freeswitch-webhook
+ */
+export function startCallMonitorServer(router: Router): void {
+  console.log('[FreeSwitchMonitor] 🚀 啟動 FreeSWITCH CDR 事件監聽');
   router.use('/freeswitch-webhook', webhookRouter);
   console.log('[FreeSwitchMonitor] 🚀 FreeSWITCH CDR Webhook 已就緒（POST /api/call-schedule/freeswitch-webhook）');
 }
-
-export const freeSwitchCallMonitor: ICallMonitorService = {
-  registerCall,
-  cancelScheduleJobs,
-
-  start(router?: Router) {
-    console.log('[FreeSwitchMonitor] 🚀 啟動 FreeSWITCH CDR 事件監聽');
-    if (!router) throw new Error('[FreeSwitchMonitor] FreeSwitch 模式需要傳入 callScheduleRouter');
-    connect(router);
-  },
-};

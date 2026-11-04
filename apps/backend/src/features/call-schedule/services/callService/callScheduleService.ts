@@ -2,8 +2,8 @@ import { randomUUID } from 'crypto';
 import schedule from 'node-schedule';
 import { formatInTimeZone } from 'date-fns-tz';
 import { getDatabase } from '../database';
-import { phoneApiService } from './phoneApiService';
-import { registerCall, cancelScheduleJobs } from './callMonitorService';
+import * as freeSwitchApi from '../api/freeSwitchApi';
+import { registerCall, cancelScheduleJobs } from './monitor/callMonitorCore';
 import { notifyCallResult } from './monitor/callResultNotifier';
 import { getSiteTimezone } from '@call-schedule/util/timezone';
 
@@ -106,7 +106,7 @@ function scheduleCallJob(
   schedule.scheduleJob(id, jobDate, async () => {
     console.log(`[CallScheduleService] Executing job ${id} at ${new Date().toISOString()}`);
     try {
-      const result = await phoneApiService.makeCall(fromExtension, extension);
+      const result = await freeSwitchApi.makeMorningCall(fromExtension, extension);
       if (!result.success) {
         console.error(`[CallScheduleService] Call failed for ${id}:`, result.error);
         db.prepare(`UPDATE call_schedules SET callStatus = 'ERROR' WHERE id = ?`).run(id);
@@ -240,7 +240,7 @@ export async function triggerImmediateCall(params: TriggerImmediateCallParams): 
     VALUES (?, ?, ?, ?, 'CALLING', NULL, ?, ?, ?, ?, ?, ?, NULL)
   `).run(newId, audioFile, createdAt, extension, notes, notificationContent, retryIntervalMin, maxRetriesNum, createdAt, roomNum ?? null);
 
-  const result = await phoneApiService.makeCall(fromExtension, extension);
+  const result = await freeSwitchApi.makeMorningCall(fromExtension, extension);
   if (!result.success) {
     console.error(`[CallScheduleService] triggerImmediateCall failed for ${newId}:`, result.error);
     db.prepare(`UPDATE call_schedules SET callStatus = 'ERROR' WHERE id = ?`).run(newId);

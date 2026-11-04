@@ -2,7 +2,7 @@
 
 **版本：v4.0.0**
 
-依排程自動撥打語音通知的服務，支援多種電話設備，並可透過 FIAS 協定與飯店 PMS 整合，提供叫醒服務、入住退房分機權限同步等功能。
+依排程自動撥打語音通知的服務，透過 FreeSwitch / FusionPBX 撥號，並可透過 FIAS 協定與飯店 PMS 整合，提供叫醒服務、入住退房分機權限同步等功能。
 
 > 本專案由 `bonsale_3cx-outbound-campaign` 拆分而來，只保留自動語音通知（Call Schedule）功能。
 
@@ -11,7 +11,7 @@
 ### 自動語音通知
 - ✅ 排程自動撥打，重啟後自動恢復未執行的排程
 - ✅ 未接聽自動重試（可設定次數與間隔）
-- ✅ 支援 NewRock / Yeastar / FreeSwitch 三種電話設備，透過環境變數切換，不需改程式碼
+- ✅ 透過 FreeSwitch / FusionPBX 撥號，CDR webhook 回報通話結果
 - ✅ 管理介面：排程列表、篩選、新增、編輯、刪除、立即撥打
 
 ### FIAS PMS 整合（飯店叫醒服務）
@@ -35,7 +35,7 @@ bonvies_call-schedule/
 │   │   │   ├── shared/                # 環境變數驗證、設定 API、log 時間戳
 │   │   │   └── features/call-schedule/
 │   │   │       ├── routes/            # callSchedule.ts、hotel/lakeshore.ts
-│   │   │       ├── services/          # 排程、SQLite、設備撥號與監控抽象層
+│   │   │       ├── services/          # 排程、SQLite、FreeSwitch 撥號與通話監控
 │   │   │       ├── components/        # FIAS 訊息處理
 │   │   │       └── util/              # FIAS TCP server/client、時區
 │   │   ├── data/                      # SQLite 資料庫（不進版控）
@@ -68,24 +68,11 @@ bonvies_call-schedule/
 ```bash
 CLIENT_ID=demo                  # 客戶識別；lakeshore 會額外掛載煙波專屬 API
 SITE_TIMEZONE=Asia/Taipei       # 站點時區（IANA 格式），排程與顯示皆以此為準
-TELEPHONE_EQUIPMENT=NewRock     # NewRock | Yeastar | FreeSwitch
 ```
 
-### 電話設備（依 `TELEPHONE_EQUIPMENT` 擇一必填）
+### 電話設備（FreeSwitch，必填）
 
 ```bash
-# NewRock
-NEW_ROCK_API_HOST=<YOUR_NEW_ROCK_API_HOST>
-NEW_ROCK_API_PATH=/xml
-NEW_ROCK_API_MONITOR_PORT=4022
-
-# Yeastar
-YEASTAR_API_HOST=<YOUR_YEASTAR_API_HOST>
-YEASTAR_API_PATH=/openapi/v1.0
-YEASTAR_USERNAME=<YOUR_YEASTAR_USERNAME>
-YEASTAR_PASSWORD=<YOUR_YEASTAR_PASSWORD>
-
-# FreeSwitch
 FREESWITCH_API_URL=<PY_DIALER_URL>
 FREESWITCH_CALLBACK_BASE_URL=<本服務對外網址>
 FREESWITCH_PMS_API_KEY=<YOUR_FREESWITCH_PMS_API_KEY>
@@ -131,7 +118,6 @@ pnpm docker:up
 | 前端 | http://localhost:4030 |
 | 後端 API | http://localhost:4020 |
 | FIAS TCP（server 模式） | localhost:4021 |
-| NewRock 事件接收 | localhost:4022 |
 
 ## 🔌 API
 
@@ -191,7 +177,7 @@ docker-compose -f docker-compose.prod.yml up -d backend   # 重新建立容器�
 | **後端** | Node.js + Express + TypeScript |
 | **資料庫** | SQLite（better-sqlite3） |
 | **排程** | node-schedule |
-| **電話設備** | NewRock OM API / Yeastar OpenAPI / FreeSwitch（可切換） |
+| **電話設備** | FreeSwitch / FusionPBX（py-dialer + PMS Middleware） |
 | **PMS 整合** | FIAS 協定（Server / Client 雙模式） |
 | **容器化** | Docker + Docker Compose |
 | **託管** | Google Cloud Platform |
@@ -206,7 +192,7 @@ docker-compose -f docker-compose.prod.yml up -d backend   # 重新建立容器�
 
 ### 撥不出電話
 - 查看後端日誌是否有 `話機設備初始化失敗`
-- 確認 `TELEPHONE_EQUIPMENT` 與對應設備變數正確、網路可達
+- 確認 `FREESWITCH_*` 變數正確、py-dialer 網路可達
 
 ### FIAS 連線問題
 - **Server 模式**：確認防火牆已開放 `FIAS_PORT`（預設 4021）供 PMS 連入

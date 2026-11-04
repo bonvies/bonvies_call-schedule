@@ -42,7 +42,7 @@ pnpm -F call-schedule-dashboard build
 **自動語音通知 / 飯店叫醒服務**：依排程撥打電話給指定分機，並與飯店 PMS 整合。
 
 1. **排程撥號**：排程存在 SQLite，時間到由 node-schedule 觸發撥號；未接聽可自動重試
-2. **電話設備抽象層**：NewRock / Yeastar / FreeSwitch 三種設備，用 `TELEPHONE_EQUIPMENT` 切換，程式碼不需改動
+2. **電話設備**：FreeSwitch / FusionPBX（py-dialer 撥號、CDR webhook 回報結果、PMS Middleware 同步分機）
 3. **FIAS PMS 整合**：透過 TCP 與飯店 PMS 交換 FIAS 訊息（叫醒 WR/WA、入住退房、語系同步等）
 4. **客戶專屬路由**：依 `CLIENT_ID` 掛載客製化 HTTP API（目前有 `lakeshore` 煙波）
 5. **前端**：單頁排程管理介面（列表 / 新增 / 編輯 / 刪除 / 立即撥打）
@@ -73,14 +73,11 @@ apps/backend/src/
       database.ts                # SQLite schema 與 migration
       callService/
         callScheduleService.ts   # 排程核心（node-schedule）
-        phoneApiService.ts       # IPhoneApiService 抽象層，設備切換點
-        callMonitorService.ts    # ICallMonitorService 抽象層，監控切換點
-        device/                  # newRock / yeastar / freeSwitch 撥號實作
         monitor/
           callMonitorCore.ts     # 共用邏輯（pendingCalls、retry、answer/bye 判定）
           callResultNotifier.ts  # 通話結果 handler 註冊（FIAS WA 回報等）
-          device/                # 各設備的通話狀態監控實作
-      api/                       # 各設備底層 API client、PMS 分機服務
+          freeSwitchCallMonitor.ts # FreeSwitch CDR webhook → handleAnswer / handleBye
+      api/                       # freeSwitchApi（init / 撥號）、freeSwitchPmsApi（入住/退房/分機更新）
     components/
       fiasHandler.ts             # FIAS 訊息分派
       fiasWakeupResultHandler.ts # 叫醒結果回報 PMS（WA）
@@ -101,21 +98,15 @@ apps/frontend/src/
 2. 其餘模組靜態 import
 3. `validateEnv()`：缺漏或填錯會列出並 `process.exit(1)`
 4. 掛載路由 → 404 handler → error handler
-5. `app.listen` 後執行 `setupCallSchedule()`：DB → 設備 init → 恢復排程 → 啟動監控 → FIAS
+5. `app.listen` 後執行 `setupCallSchedule()`：DB → FreeSwitch init → 恢復排程 → 啟動監控 → FIAS
 
-**模組載入時不可 throw**：call-schedule 模組是靜態 import，會在 `validateEnv()` 之前就被載入。模組頂層只能把 env 讀成常數，不能在載入時就因為 env 缺漏而 throw；需要驗證的邏輯放在函式裡延後執行（參考 `phoneApiService.ts` 的 `getDevice()`）。
+**模組載入時不可 throw**：call-schedule 模組是靜態 import，會在 `validateEnv()` 之前就被載入。模組頂層只能把 env 讀成常數，不能在載入時就因為 env 缺漏而 throw；需要驗證的邏輯放在函式裡延後執行（參考 `freeSwitchApi.init()`）。
 
 ### Timezone
 - `SITE_TIMEZONE`（IANA，例如 `Asia/Taipei`）為**必填**，`validateEnv` 會驗證格式
 - DB 與 API 的 `date` 一律為 UTC ISO 8601（`Z` 結尾），顯示時才依 `SITE_TIMEZONE` 轉換
 - 前端透過 `GET /api/config/timezone` 取得時區
 - `LOG_TIMEZONE` 只影響 log 時間戳，與業務時區無關
-
-### Adding a New Phone Device
-1. `services/callService/device/` 實作 `IPhoneApiService`
-2. `services/callService/monitor/device/` 實作 `ICallMonitorService`
-3. 加入 `phoneApiService.ts` 與 `callMonitorService.ts` 的 device map
-4. `validateEnv.ts` 加入該設備的必填變數，並更新 `apps/backend/.env.example`
 
 ### Adding a Customer-Specific Route
 在 `app.ts` 的 `switch (CLIENT_ID)` 加一個 case，路由檔放在 `routes/hotel/`。若需要非 FIAS 規格的客製化通話結果通知，在 `setupCallSchedule()` 另外 `registerCallResultHandler()`。
@@ -148,7 +139,7 @@ Node.js 是單執行緒，但 `await` 之間其他事件仍可插入。`callMoni
 ```bash
 CLIENT_ID=demo
 SITE_TIMEZONE=Asia/Taipei
-TELEPHONE_EQUIPMENT=NewRock   # NewRock | Yeastar | FreeSwitch，並填入對應設備的必填變數
+FREESWITCH_API_URL=...        # 以及 FREESWITCH_CALLBACK_BASE_URL / FREESWITCH_PMS_API_KEY / FREESWITCH_PMS_DOMAIN_NAME
 ```
 
 ## Ports
@@ -157,7 +148,6 @@ TELEPHONE_EQUIPMENT=NewRock   # NewRock | Yeastar | FreeSwitch，並填入對應
 |------|------|
 | 4020 | Backend HTTP API |
 | 4021 | FIAS TCP server（`FIAS_MODE=server`） |
-| 4022 | NewRock 事件 Push 接收（`TELEPHONE_EQUIPMENT=NewRock`） |
 | 4030 | Frontend |
 
 ## Testing
@@ -183,8 +173,8 @@ VM 上以 `docker-compose.prod.yml` 拉取並啟動。SQLite 存在 `sqlite_data
 | `apps/backend/src/shared/util/validateEnv.ts` | 環境變數驗證規則 |
 | `apps/backend/.env.example` | 環境變數說明（必填／條件必填／選填） |
 | `apps/backend/src/features/call-schedule/services/callService/callScheduleService.ts` | 排程核心 |
-| `apps/backend/src/features/call-schedule/services/callService/phoneApiService.ts` | 設備切換點（撥號） |
-| `apps/backend/src/features/call-schedule/services/callService/callMonitorService.ts` | 設備切換點（監控） |
+| `apps/backend/src/features/call-schedule/services/api/freeSwitchApi.ts` | 撥號（py-dialer） |
+| `apps/backend/src/features/call-schedule/services/callService/monitor/freeSwitchCallMonitor.ts` | 通話結果 webhook |
 | `apps/backend/src/features/call-schedule/services/callService/monitor/callMonitorCore.ts` | 通話監控共用邏輯 |
 | `apps/backend/src/features/call-schedule/components/fiasHandler.ts` | FIAS 訊息處理 |
 | `apps/backend/src/features/call-schedule/services/database.ts` | SQLite schema |

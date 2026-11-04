@@ -179,3 +179,5 @@ function enqueueCall(call: PendingCall): void {
 | `apps/backend/src/features/call-schedule/services/callService/monitor/device/NewRockCallMonitorService.ts` | 改用 `clearPendingCall()` 取代直接操作 Map |
 | `apps/backend/src/features/call-schedule/components/fiasWakeupResultHandler.ts` | 送出最終 `WA` 記錄回報 PMS |
 | `docs/FIAS_LAKESHORE_TEST_LOG.md` | 煙波實測原始封包記錄 |
+
+> **後記**：NewRock / Yeastar 已於 v4.x 移除，目前只剩 FreeSwitch。上文提到的 `clearPendingCall()`、`NewRockCallMonitorService.ts` 已不存在；`FreeSwitchCallMonitorService.ts` 改名為 `monitor/freeSwitchCallMonitor.ts`；`phoneApiService.makeCall()` 已併入 `freeSwitchApi.makeMorningCall()`。

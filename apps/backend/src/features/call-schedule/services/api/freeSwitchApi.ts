@@ -1,6 +1,6 @@
 import axios from 'axios';
 import { randomUUID } from 'node:crypto';
-import { ApiResult } from '../callService/phoneApiService';
+import { ApiResult } from '@call-schedule/types/apiResult';
 import dotenv from 'dotenv';
 
 dotenv.config();
@@ -30,7 +30,7 @@ function buildCallbackUrl(): string | undefined {
 }
 
 // /make_morning_call 與 /make_call 為非同步模式：API 先回 accepted/queued，
-// 實際通話結果由 callback_url 回呼（見 FreeSwitchCallMonitorService）
+// 實際通話結果由 callback_url 回呼（見 monitor/freeSwitchCallMonitor.ts）
 type AsyncCallResponse = {
   status: 'accepted' | 'success' | 'failed' | 'error' | string;
   result?: string;           // e.g. 'queued'
@@ -53,6 +53,18 @@ export async function healthCheck(): Promise<ApiResult<{ status: string }>> {
   }
 }
 
+/** 開機時呼叫一次：確認 py-dialer 可連線（失敗時 throw，由 app.ts 決定只 log 不中斷） */
+export async function init(): Promise<void> {
+  if (!process.env.FREESWITCH_API_URL) throw Error('尚未設定 FreeSwitch 設備端點');
+
+  const health = await healthCheck();
+  if (!health.success || health.data?.status !== 'ok') {
+    throw new Error(`[freeSwitch] py-dialer 健康檢查失敗：${JSON.stringify(health.error ?? health.data)}`);
+  }
+
+  console.log(`[freeSwitch] 初始化完成，API: ${API_URL}`);
+}
+
 /**
  * 撥打叫醒電話（非同步：回應 accepted 只代表已排入佇列，結果經 callback 回報）。
  *
@@ -61,6 +73,9 @@ export async function healthCheck(): Promise<ApiResult<{ status: string }>> {
  * from（caller_id）欄位會被忽略、不影響實際行為，僅為相容 request 格式而送。
  * OM_CALL_FROM_EXTENSION 對 FreeSwitch 來說因此沒有實質作用，
  * 真的需要指定主叫方時應改用 makeCall()。
+ *
+ * 回應裡的 request_id 會跟稍後的 CDR callback 帶同一個值，填進 ApiResult.callId
+ * 供 callMonitorCore 精準比對是哪一通電話。
  */
 export async function makeMorningCall(from: string, to: string): Promise<ApiResult<unknown>> {
   const requestId = randomUUID();
@@ -84,7 +99,8 @@ export async function makeMorningCall(from: string, to: string): Promise<ApiResu
 
     // 舊版同步模式回 success，新版非同步模式回 accepted，兩者皆視為撥號請求成功
     if (json.status === 'accepted' || json.status === 'success') {
-      return { success: true, data: json };
+      const callId = typeof json.request_id === 'string' ? json.request_id : undefined;
+      return { success: true, data: json, callId };
     }
     return { success: false, error: json.error_detail ?? json.message ?? json };
   } catch (err) {

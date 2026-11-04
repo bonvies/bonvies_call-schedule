@@ -7,7 +7,6 @@ services:
     ports:
       - "4020:4020"
       - "4021:4021"
-      - "4022:4022"
     env_file:
       - .env
     volumes:
